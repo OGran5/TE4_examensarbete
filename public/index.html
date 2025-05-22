@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>2D Platformer Multiplayer</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background: #111;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    canvas {
+      border: 2px solid white;
+      margin-top: 1rem;
+    }
+    #controls {
+      margin-top: 1rem;
+      display: flex;
+      gap: 0.5rem;
+    }
+    input[type="text"] {
+      padding: 0.5rem;
+      font-size: 1rem;
+      width: 160px;
+    }
+    button {
+      padding: 0.5rem 1rem;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    #roomInfo {
+      margin-top: 1rem;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <h1>2D Platformer Multiplayer</h1>
+
+  <div id="controls">
+    <button id="hostBtn">Host Game</button>
+    <input id="joinCode" type="text" placeholder="Room Code">
+    <button id="joinBtn">Join Game</button>
+  </div>
+
+  <div id="roomInfo" style="margin-top: 1rem;">
+    <span id="roomCodeDisplay" style="font-size: 1.2rem; color: lime;"></span>
+  </div>
+  
+  <canvas></canvas>
+
+  <script type="module">
+    import { connectToSignalingServer, createRoom, joinRoom } from '/src/webrtc.js';
+    import '/src/index.js';
+
+    connectToSignalingServer();
+
+    document.getElementById('hostBtn').addEventListener('click', () => {
+      createRoom((roomId) => {
+      const display = document.getElementById('roomCodeDisplay');
+      if (display) display.textContent = 'Share this code: ' + roomId;
+      else alert('Room created! Code: ' + roomId);  // fallback
+    });
+    });
+
+    document.getElementById('joinBtn').addEventListener('click', () => {
+      const code = document.getElementById('joinCode').value.trim();
+      if (code) joinRoom(code);
+    });
+  </script>
+</body>
+</html>
