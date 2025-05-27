@@ -1,16 +1,28 @@
+import { sendGameState,  connectToSignalingServer, createRoom, joinRoom, onRemoteUpdate } from './webrtc.js';
 import { Player } from './Player.js';
 import { Sprite } from './Sprite.js';
 import { CollisionBlock } from './CollisionBlock.js';
 import { floorCollisions, platformCollisions } from './collisions.js';
 import { collision, platformCollision } from './utils.js';
-import {
-  connectToSignalingServer,
-  createRoom,
-  joinRoom,
-  sendGameState,
-  setRemoteUpdateCallback,
-  startConnection
-} from './webrtc.js';
+let localPlayer;
+let remotePlayer;
+
+
+connectToSignalingServer();
+
+function createLocalPlayer(config) {
+  localPlayer = new Player(config);
+}
+
+function createRemotePlayer(config) {
+  remotePlayer = new Player({ ...config, color: 'blue' });
+}
+
+onRemoteUpdate((state) => {
+  if (!remotePlayer) return;
+  remotePlayer.position.x = state.x;
+  remotePlayer.position.y = state.y;
+});
 
 const canvas = document.querySelector('canvas');
 const c = canvas.getContext('2d');
@@ -40,8 +52,8 @@ floorCollisions2D.forEach((row, y) => {
 });
 
 const platformCollisions2D = [];
-for (let i = 0; i < platformCollisions.length; i += 36) {
-  platformCollisions2D.push(platformCollisions.slice(i, i + 36));
+for (let j = 0; j < platformCollisions.length; j += 36) {
+  platformCollisions2D.push(platformCollisions.slice(j, j + 36));
 }
 
 const platformCollisionBlocks = [];
@@ -67,12 +79,6 @@ const player = new Player({
   imageSrc: './img/player.png',
 });
 
-const remotePlayer = new Player({
-  position: { x: 200, y: 300 },
-  collisionBlocks,
-  platformCollisionBlocks,
-  imageSrc: './img/player.png',
-});
 
 const keys = {
   d: { pressed: false },
@@ -94,6 +100,11 @@ const camera = {
 };
 
 function animate() {
+  sendGameState({ x: player.position.x, y: player.position.y });
+  if (remotePlayer) {
+    remotePlayer.update();
+    console.log('[SYNC] Remote player updated at', remotePlayer.position);
+  }
   window.requestAnimationFrame(animate);
   c.fillStyle = 'white';
   c.fillRect(0, 0, canvas.width, canvas.height);
@@ -102,10 +113,13 @@ function animate() {
   c.scale(4, 4);
   c.translate(camera.position.x, camera.position.y);
   background.update(c);
+  if (remotePlayer) {
+    remotePlayer.update({ canvas, context: c, camera });
+    remotePlayer.draw(c);
+  }
 
   player.checkForHorizontalCanvasCollision();
   player.update(c);
-  remotePlayer.update(c);
 
   player.velocity.x = 0;
   if (keys.d.pressed) {player.velocity.x = 2;
@@ -140,7 +154,13 @@ function updateRemotePlayer(data) {
 }
 
 connectToSignalingServer();
-setRemoteUpdateCallback(updateRemotePlayer);
+onRemoteUpdate((remoteState) => {
+  if (remotePlayer) {
+    remotePlayer.position.x = remoteState.x;
+    remotePlayer.position.y = remoteState.y;
+  }
+});
+onRemoteUpdate(updateRemotePlayer);
 
 animate();
 
@@ -157,4 +177,17 @@ window.addEventListener('keyup', (event) => {
     case 'd': keys.d.pressed = false; break;
     case 'a': keys.a.pressed = false; break;
   }
+});
+
+onRemoteUpdate((remoteState) => {
+  if (!remotePlayer) return;
+  Object.assign(remotePlayer.position, remoteState.position);
+  remotePlayer.velocity = remoteState.velocity;
+});
+
+onRemoteUpdate((remoteState) => {
+  if (!remotePlayer) return;
+  remotePlayer.position.x = remoteState.position.x;
+  remotePlayer.position.y = remoteState.position.y;
+  remotePlayer.velocity = remoteState.velocity;
 });

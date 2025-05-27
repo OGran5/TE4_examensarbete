@@ -1,102 +1,122 @@
+
 let ws;
 let peerConnection;
 let dataChannel;
-let isHost = false;
 let remoteUpdateCallback = () => {};
 
-const signalingServerUrl = 'ws://localhost:3000/ws';
-
 export function connectToSignalingServer() {
-  ws = new WebSocket(signalingServerUrl);
-  ws.onopen = () => console.log('[WebRTC] Connected to signaling server');
+  console.log("[WebRTC] Connecting to signaling server: ws://localhost:3000/ws");
+  ws = new WebSocket("ws://localhost:3000/ws");
+
+  ws.onopen = () => {
+    console.log("[WebRTC] Connected to signaling server");
+  };
 
   ws.onmessage = async (event) => {
-    const data = JSON.parse(event.data);
-    switch (data.type) {
-      case 'created':
-        console.log('[WebRTC] Room created:', data.roomId);
-        isHost = true;
-        setupPeerConnection();
-        dataChannel = peerConnection.createDataChannel('game');
-        setupDataChannel();
-        window.startConnection && startConnection();
-        if (window.roomCallback) window.roomCallback(data.roomId);
-        break;
-      case 'joined':
-        console.log('[WebRTC] Joined room:', data.roomId);
-        setupPeerConnection();
-        break;
-      case 'peerJoined':
-        console.log('[WebRTC] A peer joined the room');
-        startConnection();
-        break;
-      case 'signal':
-        await handleSignal(data.data);
-        break;
-      case 'error':
-        console.error('[WebRTC]', data.message);
-        break;
+    console.log("[SIGNALING] Message received:", event.data);
+    const msg = JSON.parse(event.data);
+
+    if (msg.type === "created") {
+      console.log("[WebRTC] Room created:", msg.roomId);
+      document.getElementById("roomCodeDisplay").textContent = msg.roomId;
+    }
+
+    if (msg.type === "joined") {
+      console.log("[WebRTC] Joined room:", msg.roomId);
+    }
+
+    if (msg.type === "peer-joined") {
+      console.log("[WebRTC] A peer joined the room");
+    }
+
+    if (msg.type === "signal") {
+      await handleSignal(msg.data);
     }
   };
 }
 
-export function createRoom(callback) {
-  window.roomCallback = callback;
-  ws.send(JSON.stringify({ type: 'create' }));
+function sendSignal(data) {
+  ws.send(JSON.stringify({ type: "signal", data }));
 }
 
-export function joinRoom(roomId) {
-  ws.send(JSON.stringify({ type: 'join', roomId }));
-}
+export async function createRoom() {
+  console.log("[WebRTC] Sending room creation request...");
+  peerConnection = createPeerConnection("host");
 
-function setupPeerConnection() {
-  peerConnection = new RTCPeerConnection();
+  dataChannel = peerConnection.createDataChannel("game");
+  console.log("[WebRTC] DataChannel created (host)");
 
-  peerConnection.onicecandidate = (event) => {
-    if (event.candidate) {
-      ws.send(JSON.stringify({ type: 'signal', data: { candidate: event.candidate } }));
-    }
-  };
-
-  peerConnection.ondatachannel = (event) => {
-    dataChannel = event.channel;
-    setupDataChannel();
-  };
-}
-
-function setupDataChannel() {
-  dataChannel.onopen = () => console.log('[WebRTC] Data channel open');
+  dataChannel.onopen = () => console.log("[WebRTC] Data channel open (host)");
   dataChannel.onmessage = (event) => {
+    console.log("[SYNC] Received (host):", event.data);
     const data = JSON.parse(event.data);
     remoteUpdateCallback(data);
   };
+
+  const offer = await peerConnection.createOffer();
+  await peerConnection.setLocalDescription(offer);
+  sendSignal({ sdp: offer });
+
+  ws.send(JSON.stringify({ type: "create" }));
+}
+
+export async function joinRoom(roomId) {
+  peerConnection = createPeerConnection("client");
+
+  peerConnection.ondatachannel = (event) => {
+    console.log("[WebRTC] ondatachannel fired");
+    dataChannel = event.channel;
+    console.log("[WebRTC] DataChannel assigned (client)");
+
+    dataChannel.onopen = () => console.log("[WebRTC] Data channel open (client)");
+    dataChannel.onmessage = (event) => {
+      console.log("[SYNC] Received (client):", event.data);
+      const data = JSON.parse(event.data);
+      remoteUpdateCallback(data);
+    };
+  };
+
+  ws.send(JSON.stringify({ type: "join", roomId }));
+}
+
+function createPeerConnection(role) {
+  console.log("[WebRTC] Creating RTCPeerConnection as", role);
+  const pc = new RTCPeerConnection();
+
+  pc.onicecandidate = (event) => {
+    if (event.candidate) {
+      sendSignal({ candidate: event.candidate });
+    }
+  };
+
+  pc.onconnectionstatechange = () => {
+    console.log("[WebRTC] Connection state:", pc.connectionState);
+  };
+
+  peerConnection = pc;
+  return pc;
 }
 
 async function handleSignal(data) {
   if (data.sdp) {
     await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
-    if (data.sdp.type === 'offer') {
+    if (data.sdp.type === "offer") {
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
-      ws.send(JSON.stringify({ type: 'signal', data: { sdp: answer } }));
+      sendSignal({ sdp: answer });
     }
   } else if (data.candidate) {
     await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
   }
 }
 
-export async function startConnection() {
-  const offer = await peerConnection.createOffer();
-  await peerConnection.setLocalDescription(offer);
-  ws.send(JSON.stringify({ type: 'signal', data: { sdp: offer } }));
+export function onRemoteUpdate(callback) {
+  remoteUpdateCallback = callback;
 }
 
 export function sendGameState(state) {
-  if (dataChannel && dataChannel.readyState === 'open') {
+  if (dataChannel && dataChannel.readyState === "open") {
     dataChannel.send(JSON.stringify(state));
+    console.log("[SYNC] Sent:", state);
   }
-}
-
-export function setRemoteUpdateCallback(callback) {
-  remoteUpdateCallback = callback;
 }
